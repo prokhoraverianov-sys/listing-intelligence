@@ -34,13 +34,19 @@ h1{font-size:1.25rem;margin:0;letter-spacing:.01em}
 .stat{padding:6px 12px;display:flex;align-items:baseline;gap:8px;border-radius:.6rem}
 .stat .v{font-size:.95rem;font-weight:600;font-variant-numeric:tabular-nums}
 .stat .l{margin-top:0;font-size:.62rem}
-.tablewrap{overflow-x:auto;border-radius:1rem}
-table{border-collapse:collapse;width:100%;font-size:.82rem;min-width:900px}
-th{position:sticky;top:0;background:var(--surface2);color:var(--muted);text-align:left;padding:9px 10px;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;user-select:none;white-space:nowrap;z-index:2}
+.tablewrap{position:relative;border-radius:1rem}
+.tablescroll{overflow-x:auto;border-radius:1rem}
+table{border-collapse:collapse;width:100%;font-size:.74rem;min-width:900px;table-layout:fixed}
+th{position:sticky;top:0;background:var(--surface2);color:var(--muted);text-align:left;padding:6px 7px;font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;user-select:none;white-space:nowrap;z-index:2;overflow:hidden;text-overflow:ellipsis;position:relative}
 th:hover{color:var(--fg)}
 th .arr{color:var(--accent)}
-th.exhead{text-align:center;padding:6px}
-td{padding:8px 10px;border-top:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums}
+th.exhead{text-align:center;padding:4px}
+th .resizer{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;z-index:3}
+th .resizer:hover,th .resizer.active{background:var(--accent)}
+td{padding:5px 7px;border-top:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.scrollnav{position:absolute;top:44px;bottom:0;width:28px;display:flex;align-items:center;justify-content:center;background:linear-gradient(90deg,var(--surface) 0,transparent);cursor:pointer;z-index:5;color:var(--fg);font-size:1.1rem;opacity:.7;user-select:none}
+.scrollnav:hover{opacity:1}
+.scrollnav.right{right:0;left:auto;background:linear-gradient(270deg,var(--surface) 0,transparent)}
 tbody tr{cursor:pointer}
 tbody tr:hover td{background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .tick{font-weight:600;color:var(--fg)}
@@ -138,7 +144,11 @@ ul.flist b{color:var(--fg)}
     <div id="colPicker" class="colpicker" style="display:none"></div>
   </div>
 </div>
-<div class="card tablewrap fade"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+<div class="card tablewrap fade">
+  <span class="scrollnav left" id="scrollLeft">‹</span>
+  <span class="scrollnav right" id="scrollRight">›</span>
+  <div class="tablescroll" id="tablescroll"><table id="maintable"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+</div>
 <div class="pat-grid" id="patterns" style="display:none;margin-top:4px"></div>
 
 <script>
@@ -185,7 +195,7 @@ function thTitle(k,label){ return METRIC_HELP[k]?` title="${(METRIC_HELP[k]).rep
 let tab="bn", sortKey="bn_perp_date", sortDir=-1, q="", filters={};
 let bnMode={spot:true,fut:true,manipOnly:false};
 const EXSEL_CFG={
-  other:{exs:["Bitget","Bybit","Coinbase","OKX"],perp:["Bitget","Bybit","Coinbase","OKX"],defOn:["Bitget","Bybit","Coinbase","OKX"]},
+  other:{exs:["Bitget","Bybit","Coinbase","OKX","Gate"],perp:["Bitget","Bybit","Coinbase","OKX","Gate"],defOn:["Bitget","Bybit","Coinbase","OKX","Gate"]},
   cand:{exs:EXS.filter(e=>e!=="Binance"),perp:PERP_EXS.filter(e=>e!=="Binance"),defOn:["Bybit","OKX","Bitget","Gate"]}
 };
 const exSel={};
@@ -200,6 +210,35 @@ function saveOrder(){ try{ localStorage.setItem("li_colorder", JSON.stringify(co
 let colVis={};
 try{ colVis=JSON.parse(localStorage.getItem("li_colvis")||"{}"); }catch(e){}
 function saveVis(){ try{ localStorage.setItem("li_colvis", JSON.stringify(colVis)); }catch(e){} }
+let colWidth={};
+try{ colWidth=JSON.parse(localStorage.getItem("li_colwidth")||"{}"); }catch(e){}
+function saveWidth(){ try{ localStorage.setItem("li_colwidth", JSON.stringify(colWidth)); }catch(e){} }
+function attachResizers(){
+  document.querySelectorAll("#thead th[data-k]").forEach(th=>{
+    const k=th.dataset.k;
+    const w=(colWidth[tab]||{})[k];
+    if(w) th.style.width=w+"px";
+    const rz=document.createElement("span"); rz.className="resizer";
+    th.appendChild(rz);
+    rz.onmousedown=e=>{
+      e.preventDefault(); e.stopPropagation();
+      rz.classList.add("active");
+      const startX=e.clientX, startW=th.offsetWidth;
+      const onMove=e2=>{ th.style.width=Math.max(30,startW+(e2.clientX-startX))+"px"; };
+      const onUp=()=>{
+        document.removeEventListener("mousemove",onMove);
+        document.removeEventListener("mouseup",onUp);
+        rz.classList.remove("active");
+        colWidth[tab]=colWidth[tab]||{};
+        colWidth[tab][k]=th.offsetWidth;
+        saveWidth();
+        justDragged=true; setTimeout(()=>justDragged=false,150);
+      };
+      document.addEventListener("mousemove",onMove);
+      document.addEventListener("mouseup",onUp);
+    };
+  });
+}
 function applyVis(cols){
   const hidden=colVis[tab];
   if(!hidden||!hidden.length) return cols;
@@ -639,6 +678,7 @@ function renderTable(){
     }).join("")+"</tr>";
   }
   attachDnd(cols);
+  attachResizers();
   document.querySelectorAll("th").forEach(th=>th.onclick=()=>{
     const k=th.dataset.k;
     if(!k||justDragged) return;
@@ -648,7 +688,11 @@ function renderTable(){
   const rs=filtered();
   document.getElementById("count").textContent=rs.length+" tokens";
   const tb=document.getElementById("tbody");
-  tb.innerHTML=rs.slice(0,600).map(r=>`<tr data-t="${r.ticker}">`+cols.map(([k])=>`<td>${cell(r,k)}</td>`).join("")+"</tr>").join("");
+  const baseK = k => k.startsWith("ex_")?"exmatrix":k.startsWith("pex_")?"perpmx":k;
+  tb.innerHTML=rs.slice(0,600).map(r=>`<tr data-t="${r.ticker}">`+cols.map(([k])=>{
+    const help=METRIC_HELP[baseK(k)];
+    return `<td${help?` title="${help.replace(/"/g,'&quot;')}"`:""}>${cell(r,k)}</td>`;
+  }).join("")+"</tr>").join("");
   tb.querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{
     const t=tr.dataset.t;
     const existing=tb.querySelector(".detail");
@@ -876,5 +920,8 @@ document.addEventListener("click",e=>{
 });
 
 document.getElementById("search").addEventListener("input",e=>{q=e.target.value.trim().toLowerCase();renderTable();});
+document.getElementById("scrollLeft").onclick=()=>document.getElementById("tablescroll").scrollBy({left:-320,behavior:"smooth"});
+document.getElementById("scrollRight").onclick=()=>document.getElementById("tablescroll").scrollBy({left:320,behavior:"smooth"});
+
 renderStats();render();
 </script>
